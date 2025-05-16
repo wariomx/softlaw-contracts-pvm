@@ -1,13 +1,36 @@
-# Sample Polkadot Hardhat Project
+# Uniswap V2 - Polkadot Hub
 
-This project demonstrates how to use Hardhat with Polkadot. It comes with a sample contract, a test for that contract, and a Hardhat Ignition module that deploys that contract.
+## Prerequisites
 
-1) Create a binary of the [`eth-rpc-adapter`](https://github.com/paritytech/polkadot-sdk/tree/master/substrate/frame/revive/rpc) and move it to `bin` folder at the root of your project. Alternatively, update your configuration file's `adapterConfig.adapterBinaryPath` to point to your local binary. For instructions, check [Polkadot Hardhat docs](https://papermoonio.github.io/polkadot-mkdocs/develop/smart-contracts/dev-environments/hardhat/#testing-your-contract).
+Ensure that you have substrate-node, eth-rpc and local resolc binaries on your local machine. If not, follow these instructions to install them:
 
-2) Try running some of the following tasks:
+```bash
+git clone https://github.com/paritytech/polkadot-sdk
+cd polkadot-sdk
+cargo build --bin substrate-node --release
+cargo build -p pallet-revive-eth-rpc --release
+```
 
-```shell
-npx hardhat test
-npx hardhat node
-npx hardhat node && npx hardhat ignition deploy ./ignition/modules/MyToken.js --network localhost
+Once the build is complete, you will find both binaries in the `./target/release` directory. Copy and paste them into the `./bin` directory of this repository.
+
+## How to Initialize
+
+```bash
+git clone https://github.com/sekisamu/hardhat-revive-uniswap-v2-core
+cd hardhat-revive-uniswap-v2-core
+pnpm install
+```
+
+Open the `hardhat.config.js` file and update the following fields under networks -> hardhat:
+
+```
+nodeBinaryPath: Set this to the local path of your substrate-node binary.
+adapterBinaryPath: Set this to the local path of your eth-rpc binary.
+```
+
+How to Test
+
+```bash
+# For PolkaVM chains
+npx hardhat test --network polkavm
 ```
