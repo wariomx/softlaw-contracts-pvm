@@ -16,8 +16,8 @@ Once the build is complete, you will find both binaries in the `./target/release
 ## How to Initialize
 
 ```bash
-git clone https://github.com/sekisamu/hardhat-revive-uniswap-v2-core
-cd hardhat-revive-uniswap-v2-core
+git clone git@github.com:papermoonio/uniswap-v2-polkadot.git
+cd uniswap-v2-polkadot
 pnpm install
 ```
 
