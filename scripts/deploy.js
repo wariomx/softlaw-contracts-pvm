@@ -31,8 +31,16 @@ async function deploy() {
   const provider = new JsonRpcProvider(rpcUrl);
   
   const pairArtifact = await hre.artifacts.readArtifact("UniswapV2Pair");
+
+  let privateKey;
+  if (networkName === "localNode") {
+    privateKey = process.env.LOCAL_PRIV_KEY;
+  }
+  if (networkName === "westendHub") {
+    privateKey = process.env.AH_PRIV_KEY;
+  }
   
-  const wallet = new ethers.Wallet(process.env.LOCAL_PRIV_KEY, provider);
+  const wallet = new ethers.Wallet(privateKey, provider);
   
   const pairFactory = new ethers.ContractFactory(
     pairArtifact.abi,
