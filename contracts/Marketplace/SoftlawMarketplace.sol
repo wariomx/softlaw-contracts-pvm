@@ -12,7 +12,7 @@ import "../interfaces/ISoftlawTreasury.sol";
  * @title SoftlawMarketplace
  * @dev Comprehensive marketplace for IP assets, licenses, and wrapped tokens
  * Features:
- * - IP NFT trading (copyrights, patents)
+ * - IP NFT trading (copyrights)
  * - License marketplace (buy/sell existing licenses)
  * - Wrapped IP token trading
  * - Auction system for rare IP
@@ -22,29 +22,28 @@ import "../interfaces/ISoftlawTreasury.sol";
  * - Liquidity pool creation assistance
  */
 contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
-    
     ISoftlawTreasury public immutable treasury;
-    
+
     // Roles
     bytes32 public constant MARKETPLACE_ADMIN = keccak256("MARKETPLACE_ADMIN");
     bytes32 public constant VERIFIED_SELLER = keccak256("VERIFIED_SELLER");
 
     // Listing types
     enum ListingType {
-        FIXED_PRICE,        // Fixed price sale
-        AUCTION,            // Time-based auction
-        BUNDLE,             // Bundle of multiple items
-        LICENSE_OFFER,      // License-specific offering
-        BULK_TRADE          // Bulk token trading
+        FIXED_PRICE, // Fixed price sale
+        AUCTION, // Time-based auction
+        BUNDLE, // Bundle of multiple items
+        LICENSE_OFFER, // License-specific offering
+        BULK_TRADE // Bulk token trading
     }
 
     // Asset types
     enum AssetType {
-        COPYRIGHT_NFT,      // Copyright NFT
-        PATENT_NFT,         // Patent NFT
-        LICENSE,            // Existing license
-        WRAPPED_IP_TOKEN,   // Wrapped IP ERC20 tokens
-        IP_BUNDLE           // Bundle of multiple IP assets
+        COPYRIGHT_NFT, // Copyright NFT
+        PATENT_NFT, // Patent NFT
+        LICENSE, // Existing license
+        WRAPPED_IP_TOKEN, // Wrapped IP ERC20 tokens
+        IP_BUNDLE // Bundle of multiple IP assets
     }
 
     // Listing status
@@ -63,11 +62,11 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         ListingStatus status;
         address seller;
         address buyer;
-        address assetContract;      // Contract address of the asset
-        uint256 assetId;           // Token ID or identifier
-        uint256 quantity;          // For ERC20 tokens
-        uint256 priceInSLAW;       // Price in SLAW tokens
-        uint256 reservePrice;      // Minimum price for auctions
+        address assetContract; // Contract address of the asset
+        uint256 assetId; // Token ID or identifier
+        uint256 quantity; // For ERC20 tokens
+        uint256 priceInSLAW; // Price in SLAW tokens
+        uint256 reservePrice; // Minimum price for auctions
         uint256 createdAt;
         uint256 expiresAt;
         uint256 soldAt;
@@ -85,7 +84,7 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         BundleItem[] bundleItems;
         // Revenue sharing
         address originalCreator;
-        uint256 creatorRoyalty;    // Basis points (100 = 1%)
+        uint256 creatorRoyalty; // Basis points (100 = 1%)
     }
 
     // Offer structure
@@ -120,15 +119,15 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
     mapping(address => uint256[]) public userPurchases;
     mapping(AssetType => uint256[]) public assetTypeListings;
     mapping(string => uint256[]) public tagListings;
-    
+
     uint256 public listingCounter = 1;
-    
+
     // Market configuration
     uint256 public constant MARKETPLACE_FEE = 250; // 2.5% in basis points
-    uint256 public constant MAX_ROYALTY = 1000;    // 10% max royalty
-    uint256 public constant LISTING_FEE = 10 * 10**18; // 10 SLAW
+    uint256 public constant MAX_ROYALTY = 1000; // 10% max royalty
+    uint256 public constant LISTING_FEE = 10 * 10 ** 18; // 10 SLAW
     uint256 public constant AUCTION_EXTENSION = 15 minutes;
-    
+
     // Market statistics
     MarketStats public marketStats;
 
@@ -139,30 +138,27 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         AssetType assetType,
         uint256 price
     );
-    
+
     event ItemSold(
         uint256 indexed listingId,
         address indexed seller,
         address indexed buyer,
         uint256 price
     );
-    
+
     event OfferMade(
         uint256 indexed listingId,
         address indexed offerer,
         uint256 amount
     );
-    
+
     event AuctionBid(
         uint256 indexed listingId,
         address indexed bidder,
         uint256 amount
     );
-    
-    event ListingCancelled(
-        uint256 indexed listingId,
-        address indexed seller
-    );
+
+    event ListingCancelled(uint256 indexed listingId, address indexed seller);
 
     event BundleSold(
         uint256 indexed listingId,
@@ -213,7 +209,13 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         treasury.payLicenseFee(address(0), msg.sender, 0, LISTING_FEE);
 
         // Validate asset ownership
-        _validateAssetOwnership(assetType, assetContract, assetId, quantity, msg.sender);
+        _validateAssetOwnership(
+            assetType,
+            assetContract,
+            assetId,
+            quantity,
+            msg.sender
+        );
 
         uint256 listingId = listingCounter++;
 
@@ -239,7 +241,7 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         // Update mappings
         userListings[msg.sender].push(listingId);
         assetTypeListings[assetType].push(listingId);
-        
+
         for (uint256 i = 0; i < tags.length; i++) {
             tagListings[tags[i]].push(listingId);
         }
@@ -283,7 +285,13 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         treasury.payLicenseFee(address(0), msg.sender, 0, LISTING_FEE);
 
         // Validate ownership
-        _validateAssetOwnership(assetType, assetContract, assetId, 1, msg.sender);
+        _validateAssetOwnership(
+            assetType,
+            assetContract,
+            assetId,
+            1,
+            msg.sender
+        );
 
         uint256 listingId = listingCounter++;
 
@@ -319,22 +327,32 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
      * @dev Buy item at fixed price
      * @param listingId Listing ID
      */
-    function buyFixedPrice(uint256 listingId) external nonReentrant whenNotPaused {
+    function buyFixedPrice(
+        uint256 listingId
+    ) external nonReentrant whenNotPaused {
         Listing storage listing = listings[listingId];
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");
-        require(listing.listingType == ListingType.FIXED_PRICE, "Not fixed price listing");
+        require(
+            listing.listingType == ListingType.FIXED_PRICE,
+            "Not fixed price listing"
+        );
         require(block.timestamp <= listing.expiresAt, "Listing expired");
         require(msg.sender != listing.seller, "Cannot buy own listing");
 
         uint256 totalPrice = listing.priceInSLAW;
-        
+
         // Calculate fees and royalties
         uint256 marketplaceFee = (totalPrice * MARKETPLACE_FEE) / 10000;
         uint256 creatorRoyalty = (totalPrice * listing.creatorRoyalty) / 10000;
         uint256 sellerAmount = totalPrice - marketplaceFee - creatorRoyalty;
 
         // Process payment through Treasury
-        treasury.payLicenseFee(listing.seller, msg.sender, listingId, totalPrice);
+        treasury.payLicenseFee(
+            listing.seller,
+            msg.sender,
+            listingId,
+            totalPrice
+        );
 
         // Transfer asset
         _transferAsset(
@@ -376,10 +394,16 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
      * @param listingId Listing ID
      * @param bidAmount Bid amount in SLAW
      */
-    function placeBid(uint256 listingId, uint256 bidAmount) external nonReentrant whenNotPaused {
+    function placeBid(
+        uint256 listingId,
+        uint256 bidAmount
+    ) external nonReentrant whenNotPaused {
         Listing storage listing = listings[listingId];
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");
-        require(listing.listingType == ListingType.AUCTION, "Not auction listing");
+        require(
+            listing.listingType == ListingType.AUCTION,
+            "Not auction listing"
+        );
         require(block.timestamp <= listing.expiresAt, "Auction ended");
         require(msg.sender != listing.seller, "Cannot bid on own auction");
         require(bidAmount >= listing.reservePrice, "Bid below reserve");
@@ -421,7 +445,8 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
             // Calculate fees and royalties
             uint256 totalPrice = listing.highestBid;
             uint256 marketplaceFee = (totalPrice * MARKETPLACE_FEE) / 10000;
-            uint256 creatorRoyalty = (totalPrice * listing.creatorRoyalty) / 10000;
+            uint256 creatorRoyalty = (totalPrice * listing.creatorRoyalty) /
+                10000;
             uint256 sellerAmount = totalPrice - marketplaceFee - creatorRoyalty;
 
             // Transfer asset to winner
@@ -453,9 +478,16 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
             // Update market stats
             marketStats.totalSales++;
             marketStats.totalVolume += totalPrice;
-            marketStats.avgPrice = marketStats.totalVolume / marketStats.totalSales;
+            marketStats.avgPrice =
+                marketStats.totalVolume /
+                marketStats.totalSales;
 
-            emit ItemSold(listingId, listing.seller, listing.highestBidder, totalPrice);
+            emit ItemSold(
+                listingId,
+                listing.seller,
+                listing.highestBidder,
+                totalPrice
+            );
         } else {
             listing.status = ListingStatus.EXPIRED;
         }
@@ -486,7 +518,7 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         treasury.transferFrom(msg.sender, address(this), offerAmount);
 
         Offer storage offer = listing.offers[msg.sender];
-        
+
         // Refund previous offer if exists
         if (offer.isActive) {
             treasury.transfer(msg.sender, offer.amount);
@@ -508,7 +540,10 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
      * @param listingId Listing ID
      * @param offerer Address of offerer
      */
-    function acceptOffer(uint256 listingId, address offerer) external nonReentrant {
+    function acceptOffer(
+        uint256 listingId,
+        address offerer
+    ) external nonReentrant {
         Listing storage listing = listings[listingId];
         require(msg.sender == listing.seller, "Not seller");
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");
@@ -518,7 +553,7 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         require(block.timestamp <= offer.expiresAt, "Offer expired");
 
         uint256 totalPrice = offer.amount;
-        
+
         // Calculate fees and royalties
         uint256 marketplaceFee = (totalPrice * MARKETPLACE_FEE) / 10000;
         uint256 creatorRoyalty = (totalPrice * listing.creatorRoyalty) / 10000;
@@ -563,16 +598,22 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
 
     // ===== VIEW FUNCTIONS =====
 
-    function getListing(uint256 listingId) external view returns (
-        uint256 id,
-        ListingType listingType,
-        AssetType assetType,
-        ListingStatus status,
-        address seller,
-        uint256 priceInSLAW,
-        uint256 expiresAt,
-        string memory title
-    ) {
+    function getListing(
+        uint256 listingId
+    )
+        external
+        view
+        returns (
+            uint256 id,
+            ListingType listingType,
+            AssetType assetType,
+            ListingStatus status,
+            address seller,
+            uint256 priceInSLAW,
+            uint256 expiresAt,
+            string memory title
+        )
+    {
         Listing storage listing = listings[listingId];
         return (
             listing.id,
@@ -586,19 +627,27 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         );
     }
 
-    function getUserListings(address user) external view returns (uint256[] memory) {
+    function getUserListings(
+        address user
+    ) external view returns (uint256[] memory) {
         return userListings[user];
     }
 
-    function getUserPurchases(address user) external view returns (uint256[] memory) {
+    function getUserPurchases(
+        address user
+    ) external view returns (uint256[] memory) {
         return userPurchases[user];
     }
 
-    function getListingsByAssetType(AssetType assetType) external view returns (uint256[] memory) {
+    function getListingsByAssetType(
+        AssetType assetType
+    ) external view returns (uint256[] memory) {
         return assetTypeListings[assetType];
     }
 
-    function getListingsByTag(string memory tag) external view returns (uint256[] memory) {
+    function getListingsByTag(
+        string memory tag
+    ) external view returns (uint256[] memory) {
         return tagListings[tag];
     }
 
@@ -606,7 +655,10 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         return marketStats;
     }
 
-    function getOffer(uint256 listingId, address offerer) external view returns (Offer memory) {
+    function getOffer(
+        uint256 listingId,
+        address offerer
+    ) external view returns (Offer memory) {
         return listings[listingId].offers[offerer];
     }
 
@@ -619,10 +671,19 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         uint256 quantity,
         address owner
     ) internal view {
-        if (assetType == AssetType.COPYRIGHT_NFT || assetType == AssetType.PATENT_NFT) {
-            require(IERC721(assetContract).ownerOf(assetId) == owner, "Not NFT owner");
+        if (
+            assetType == AssetType.COPYRIGHT_NFT ||
+            assetType == AssetType.PATENT_NFT
+        ) {
+            require(
+                IERC721(assetContract).ownerOf(assetId) == owner,
+                "Not NFT owner"
+            );
         } else if (assetType == AssetType.WRAPPED_IP_TOKEN) {
-            require(IERC20(assetContract).balanceOf(owner) >= quantity, "Insufficient tokens");
+            require(
+                IERC20(assetContract).balanceOf(owner) >= quantity,
+                "Insufficient tokens"
+            );
         }
         // Add more validation for other asset types
     }
@@ -635,7 +696,10 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         address from,
         address to
     ) internal {
-        if (assetType == AssetType.COPYRIGHT_NFT || assetType == AssetType.PATENT_NFT) {
+        if (
+            assetType == AssetType.COPYRIGHT_NFT ||
+            assetType == AssetType.PATENT_NFT
+        ) {
             IERC721(assetContract).safeTransferFrom(from, to, assetId);
         } else if (assetType == AssetType.WRAPPED_IP_TOKEN) {
             IERC20(assetContract).transferFrom(from, to, quantity);
@@ -643,9 +707,12 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         // Handle other asset types
     }
 
-    function _refundOtherOffers(uint256 listingId, address acceptedOfferer) internal {
+    function _refundOtherOffers(
+        uint256 listingId,
+        address acceptedOfferer
+    ) internal {
         Listing storage listing = listings[listingId];
-        
+
         for (uint256 i = 0; i < listing.offerAddresses.length; i++) {
             address offererAddr = listing.offerAddresses[i];
             if (offererAddr != acceptedOfferer) {
@@ -658,13 +725,17 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
         }
     }
 
-    function _asSingletonArray(address element) internal pure returns (address[] memory) {
+    function _asSingletonArray(
+        address element
+    ) internal pure returns (address[] memory) {
         address[] memory array = new address[](1);
         array[0] = element;
         return array;
     }
 
-    function _asSingletonArray(uint256 element) internal pure returns (uint256[] memory) {
+    function _asSingletonArray(
+        uint256 element
+    ) internal pure returns (uint256[] memory) {
         uint256[] memory array = new uint256[](1);
         array[0] = element;
         return array;
@@ -683,7 +754,8 @@ contract SoftlawMarketplace is AccessControl, ReentrancyGuard, Pausable {
     function cancelListing(uint256 listingId) external {
         Listing storage listing = listings[listingId];
         require(
-            msg.sender == listing.seller || hasRole(MARKETPLACE_ADMIN, msg.sender),
+            msg.sender == listing.seller ||
+                hasRole(MARKETPLACE_ADMIN, msg.sender),
             "Not authorized"
         );
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");

@@ -7,5 +7,5 @@ contract Test is DAOTreasury {
     //     _mint(msg.sender, _totalSupply);
     // }
 
-    constructor(address _owner) public DAOTreasury(_owner) {}
+    constructor(address _owner) DAOTreasury(_owner) {}
 }
