@@ -1,14 +1,35 @@
 {
-  "name": "uniswap-v2-polkadot",
+  "name": "softlaw-contracts-pvm",
   "version": "1.0.0",
+  "description": "Comprehensive legal technology platform built on Polkadot Virtual Machine (PVM) with smart contracts for legal services, IP management, dispute resolution, and DAO governance.",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "npx hardhat test",
+    "test:local": "npx hardhat test --network localNode",
+    "test:westend": "npx hardhat test --network westendHub",
+    "test:passet": "npx hardhat test --network passetHub",
+    "deploy:local": "npx hardhat run scripts/deploy.js --network localNode",
+    "deploy:westend": "npx hardhat run scripts/deploy.js --network westendHub",
+    "deploy:passet": "npx hardhat run scripts/deploy.js --network passetHub",
+    "compile": "npx hardhat compile"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "legal-tech",
+    "polkadot",
+    "smart-contracts",
+    "pvm",
+    "dao",
+    "dispute-resolution",
+    "intellectual-property",
+    "blockchain",
+    "legal-services"
+  ],
+  "author": "Softlaw Team",
   "license": "ISC",
-  "description": "",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wariomx/softlaw-contracts-pvm.git"
+  },
   "devDependencies": {
     "@nomicfoundation/hardhat-toolbox": "^5.0.0",
     "@parity/hardhat-polkadot": "^0.1.5",
