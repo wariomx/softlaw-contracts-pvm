@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
  * @title OptimizedADRSystem
@@ -13,14 +13,23 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
  * - Polkadot-native signature verification (no ecrecover)
  * - Memory-efficient design
  * - Treasury integration for payments
+ * @dev Comprehensive dispute resolution system for IP-related conflicts
+ * Features:
+ * - Multi-stage dispute process (filing, mediation, arbitration, appeal)
+ * - Treasury integration for SLAW payments and escrow
+ * - Qualified arbitrator network
+ * - Evidence management system
+ * - Automated enforcement
+ * - Integration with IP contracts (copyrights, patents, ...)
  */
+
 contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
     bytes32 public constant ARBITRATOR_ROLE = keccak256("ARBITRATOR_ROLE");
     bytes32 public constant MEDIATOR_ROLE = keccak256("MEDIATOR_ROLE");
     bytes32 public constant DISPUTE_ADMIN = keccak256("DISPUTE_ADMIN");
 
     address public treasuryCore;
-    
+
     // Simplified dispute types for PVM
     enum DisputeType {
         COPYRIGHT_INFRINGEMENT,
@@ -81,11 +90,11 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
     mapping(address => uint256[]) public userDisputes;
     mapping(address => Arbitrator) public arbitrators;
     mapping(address => bool) public isQualifiedArbitrator;
-    
+
     uint256 public disputeCounter = 1;
-    uint256 public constant FILING_FEE = 50 * 10**18; // 50 SLAW
-    uint256 public constant ARBITRATION_FEE = 100 * 10**18; // 100 SLAW
-    uint256 public constant EVIDENCE_FEE = 5 * 10**18; // 5 SLAW
+    uint256 public constant FILING_FEE = 50 * 10 ** 18; // 50 SLAW
+    uint256 public constant ARBITRATION_FEE = 100 * 10 ** 18; // 100 SLAW
+    uint256 public constant EVIDENCE_FEE = 5 * 10 ** 18; // 5 SLAW
 
     // Events
     event DisputeFiled(
@@ -94,31 +103,35 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
         address indexed defendant,
         DisputeType disputeType
     );
-    
+
     event DisputeStatusChanged(
         uint256 indexed disputeId,
         DisputeStatus newStatus
     );
-    
+
     event EvidenceSubmitted(
         uint256 indexed disputeId,
         uint256 indexed evidenceId,
         address indexed submitter
     );
-    
+
     event DisputeResolved(
         uint256 indexed disputeId,
         address indexed winner,
         uint256 awardAmount
     );
-    
+
     event ArbitratorRegistered(address indexed arbitrator, string name);
     event EscrowDeposited(uint256 indexed disputeId, uint256 amount);
-    event SecurePaymentProcessed(address indexed recipient, uint256 amount, bool success);
+    event SecurePaymentProcessed(
+        address indexed recipient,
+        uint256 amount,
+        bool success
+    );
 
     constructor(address _admin, address _treasuryCore) {
         require(_treasuryCore != address(0), "Invalid treasury");
-        
+
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(DISPUTE_ADMIN, _admin);
         treasuryCore = _treasuryCore;
@@ -167,13 +180,19 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
         emit DisputeFiled(disputeId, msg.sender, defendant, disputeType);
     }
 
-    function depositEscrow(uint256 disputeId, uint256 amount) external nonReentrant {
+    function depositEscrow(
+        uint256 disputeId,
+        uint256 amount
+    ) external nonReentrant {
         Dispute storage dispute = disputes[disputeId];
         require(
             msg.sender == dispute.plaintiff || msg.sender == dispute.defendant,
             "Not a party to dispute"
         );
-        require(dispute.status != DisputeStatus.RESOLVED, "Dispute already resolved");
+        require(
+            dispute.status != DisputeStatus.RESOLVED,
+            "Dispute already resolved"
+        );
 
         // Secure transfer to contract
         _processPayment(msg.sender, address(this), amount);
@@ -188,7 +207,10 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
     ) external nonReentrant {
         Dispute storage dispute = disputes[disputeId];
         require(dispute.status == DisputeStatus.FILED, "Invalid status");
-        require(hasRole(ARBITRATOR_ROLE, arbitrator), "Not qualified arbitrator");
+        require(
+            hasRole(ARBITRATOR_ROLE, arbitrator),
+            "Not qualified arbitrator"
+        );
 
         // Pay arbitration fees
         uint256 totalFee = ARBITRATION_FEE + arbitrators[arbitrator].feePerCase;
@@ -198,7 +220,11 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
         _processPayment(dispute.defendant, address(this), feePerParty);
 
         // Pay arbitrator
-        _processPayment(address(this), arbitrator, arbitrators[arbitrator].feePerCase);
+        _processPayment(
+            address(this),
+            arbitrator,
+            arbitrators[arbitrator].feePerCase
+        );
 
         dispute.status = DisputeStatus.ARBITRATION;
         dispute.assignedArbitrator = arbitrator;
@@ -216,8 +242,8 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
             "Not a party to dispute"
         );
         require(
-            dispute.status == DisputeStatus.MEDIATION || 
-            dispute.status == DisputeStatus.ARBITRATION,
+            dispute.status == DisputeStatus.MEDIATION ||
+                dispute.status == DisputeStatus.ARBITRATION,
             "Invalid status for evidence"
         );
 
@@ -244,13 +270,21 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
         string calldata reasoning
     ) external nonReentrant {
         Dispute storage dispute = disputes[disputeId];
-        require(msg.sender == dispute.assignedArbitrator, "Not assigned arbitrator");
-        require(dispute.status == DisputeStatus.ARBITRATION, "Not in arbitration");
+        require(
+            msg.sender == dispute.assignedArbitrator,
+            "Not assigned arbitrator"
+        );
+        require(
+            dispute.status == DisputeStatus.ARBITRATION,
+            "Not in arbitration"
+        );
 
         dispute.status = DisputeStatus.RESOLVED;
         dispute.resolutionDate = block.timestamp;
         dispute.awardAmount = awardAmount;
-        dispute.winner = inFavorOfPlaintiff ? dispute.plaintiff : dispute.defendant;
+        dispute.winner = inFavorOfPlaintiff
+            ? dispute.plaintiff
+            : dispute.defendant;
 
         // Update arbitrator reputation
         arbitrators[msg.sender].casesResolved++;
@@ -261,11 +295,17 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
 
     function enforceAward(uint256 disputeId) external nonReentrant {
         Dispute storage dispute = disputes[disputeId];
-        require(dispute.status == DisputeStatus.RESOLVED, "Dispute not resolved");
+        require(
+            dispute.status == DisputeStatus.RESOLVED,
+            "Dispute not resolved"
+        );
         require(dispute.winner != address(0), "No winner set");
 
         // Transfer award from escrow to winner
-        if (dispute.awardAmount > 0 && dispute.escrowAmount >= dispute.awardAmount) {
+        if (
+            dispute.awardAmount > 0 &&
+            dispute.escrowAmount >= dispute.awardAmount
+        ) {
             _secureTransfer(dispute.winner, dispute.awardAmount);
             dispute.escrowAmount -= dispute.awardAmount;
         }
@@ -274,7 +314,10 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
         if (dispute.escrowAmount > 0) {
             uint256 halfRemaining = dispute.escrowAmount / 2;
             _secureTransfer(dispute.plaintiff, halfRemaining);
-            _secureTransfer(dispute.defendant, dispute.escrowAmount - halfRemaining);
+            _secureTransfer(
+                dispute.defendant,
+                dispute.escrowAmount - halfRemaining
+            );
         }
 
         dispute.status = DisputeStatus.ENFORCED;
@@ -307,27 +350,31 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
 
     // ===== SECURE PAYMENT FUNCTIONS (No ecrecover, PVM-optimized) =====
 
-    function _processPayment(address from, address to, uint256 amount) internal {
+    function _processPayment(
+        address from,
+        address to,
+        uint256 amount
+    ) internal {
         if (amount == 0) return;
-        
+
         // Use Polkadot-native transfer mechanism
         (bool success, ) = to.call{value: amount}("");
         require(success, "Payment failed");
-        
+
         emit SecurePaymentProcessed(to, amount, success);
     }
 
     function _secureTransfer(address to, uint256 amount) internal {
         if (amount == 0) return;
-        
+
         (bool success, ) = to.call{value: amount}("");
         require(success, "Transfer failed");
-        
+
         emit SecurePaymentProcessed(to, amount, success);
     }
 
     // ===== POLKADOT-NATIVE SIGNATURE VERIFICATION =====
-    
+
     /**
      * @dev Verify signature using Polkadot's native account system
      * Replaces ecrecover with Polkadot-compatible verification
@@ -344,23 +391,34 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
 
     // ===== VIEW FUNCTIONS =====
 
-    function getDispute(uint256 disputeId) external view returns (Dispute memory) {
+    function getDispute(
+        uint256 disputeId
+    ) external view returns (Dispute memory) {
         return disputes[disputeId];
     }
 
-    function getUserDisputes(address user) external view returns (uint256[] memory) {
+    function getUserDisputes(
+        address user
+    ) external view returns (uint256[] memory) {
         return userDisputes[user];
     }
 
-    function getArbitratorInfo(address arbitrator) external view returns (Arbitrator memory) {
+    function getArbitratorInfo(
+        address arbitrator
+    ) external view returns (Arbitrator memory) {
         return arbitrators[arbitrator];
     }
 
-    function getEvidence(uint256 disputeId, uint256 evidenceId) external view returns (Evidence memory) {
+    function getEvidence(
+        uint256 disputeId,
+        uint256 evidenceId
+    ) external view returns (Evidence memory) {
         return evidence[disputeId][evidenceId];
     }
 
-    function getDisputeEvidenceCount(uint256 disputeId) external view returns (uint256) {
+    function getDisputeEvidenceCount(
+        uint256 disputeId
+    ) external view returns (uint256) {
         return evidenceCount[disputeId];
     }
 
@@ -374,20 +432,29 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
         _unpause();
     }
 
-    function updateTreasuryCore(address newTreasury) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateTreasuryCore(
+        address newTreasury
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newTreasury != address(0), "Invalid treasury");
         treasuryCore = newTreasury;
     }
 
-    function grantMediatorRole(address mediator) external onlyRole(DISPUTE_ADMIN) {
+    function grantMediatorRole(
+        address mediator
+    ) external onlyRole(DISPUTE_ADMIN) {
         _grantRole(MEDIATOR_ROLE, mediator);
     }
 
-    function revokeMediatorRole(address mediator) external onlyRole(DISPUTE_ADMIN) {
+    function revokeMediatorRole(
+        address mediator
+    ) external onlyRole(DISPUTE_ADMIN) {
         _revokeRole(MEDIATOR_ROLE, mediator);
     }
 
-    function emergencyWithdraw(address to, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function emergencyWithdraw(
+        address to,
+        uint256 amount
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(to != address(0), "Invalid recipient");
         _secureTransfer(to, amount);
     }
@@ -397,22 +464,28 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
     /**
      * @dev Get dispute statistics for dashboard
      */
-    function getDisputeStats() external view returns (
-        uint256 totalDisputes,
-        uint256 resolvedDisputes,
-        uint256 activeArbitrators
-    ) {
+    function getDisputeStats()
+        external
+        view
+        returns (
+            uint256 totalDisputes,
+            uint256 resolvedDisputes,
+            uint256 activeArbitrators
+        )
+    {
         totalDisputes = disputeCounter - 1;
-        
+
         // Count resolved disputes (simplified)
         resolvedDisputes = 0;
         for (uint256 i = 1; i < disputeCounter; i++) {
-            if (disputes[i].status == DisputeStatus.RESOLVED || 
-                disputes[i].status == DisputeStatus.ENFORCED) {
+            if (
+                disputes[i].status == DisputeStatus.RESOLVED ||
+                disputes[i].status == DisputeStatus.ENFORCED
+            ) {
                 resolvedDisputes++;
             }
         }
-        
+
         // Count active arbitrators (this could be optimized with a counter)
         activeArbitrators = 0;
         // Note: In production, maintain a separate counter for gas efficiency
@@ -421,12 +494,14 @@ contract OptimizedADRSystem is AccessControl, ReentrancyGuard, Pausable {
     /**
      * @dev Calculate dispute resolution efficiency
      */
-    function getResolutionEfficiency(address arbitrator) external view returns (uint256) {
+    function getResolutionEfficiency(
+        address arbitrator
+    ) external view returns (uint256) {
         if (!isQualifiedArbitrator[arbitrator]) return 0;
-        
+
         Arbitrator memory arb = arbitrators[arbitrator];
         if (arb.casesResolved == 0) return 1000; // Starting reputation
-        
+
         return arb.reputationScore;
     }
 }
