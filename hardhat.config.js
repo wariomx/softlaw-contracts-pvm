@@ -41,13 +41,16 @@ module.exports = {
       gas: 30000000,
       gasPrice: 1000000000,
       timeout: 120000,
+
       nodeConfig: {
-        nodeBinaryPath: "./bin/substrate-node",
+        nodeBinaryPath:
+          "/Users/wario/documents/polkadot_dev/polkadot-sdk/target/release/substrate-node",
         rpcPort: 8000,
         dev: true,
       },
       adapterConfig: {
-        adapterBinaryPath: "./bin/eth-rpc",
+        adapterBinaryPath:
+          "/Users/wario/documents/polkadot_dev/polkadot-sdk/target/release/eth-rpc",
         dev: true,
       },
     },

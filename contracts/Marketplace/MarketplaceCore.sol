@@ -1,13 +1,13 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.28;
+pragma solidity ^0.8.19;
 
-import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/access/AccessControl.sol";
-import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import "@openzeppelin/contracts/utils/Pausable.sol";
-import "./SLAWToken.sol";
-import "./TreasuryCore.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
+import "../IP-liquidity/SLAWToken.sol";
+import "../treasury/TreasuryCore.sol";
 
 /**
  * @title MarketplaceCore
@@ -27,11 +27,18 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
     // System contracts
     SLAWToken public immutable slawToken;
     TreasuryCore public treasuryCore;
-    
+
     // Listing types
-    enum ListingType { NFT, TOKEN }
-    enum ListingStatus { ACTIVE, SOLD, CANCELLED }
-    
+    enum ListingType {
+        NFT,
+        TOKEN
+    }
+    enum ListingStatus {
+        ACTIVE,
+        SOLD,
+        CANCELLED
+    }
+
     // Listing structure
     struct Listing {
         uint256 listingId;
@@ -45,7 +52,7 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         uint256 expiresAt;
         bool allowOffers;
     }
-    
+
     // Offer structure
     struct Offer {
         uint256 offerId;
@@ -56,27 +63,27 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         bool isActive;
         uint256 createdAt;
     }
-    
+
     // State variables
     mapping(uint256 => Listing) public listings;
     mapping(uint256 => Offer) public offers;
     mapping(uint256 => uint256[]) public listingOffers; // listingId => offerIds[]
     mapping(address => uint256[]) public userListings; // seller => listingIds[]
     mapping(address => uint256[]) public userOffers; // offerer => offerIds[]
-    
+
     // Counters
     uint256 public nextListingId = 1;
     uint256 public nextOfferId = 1;
-    
+
     // System metrics
     uint256 public totalListings;
     uint256 public totalSales;
     uint256 public totalVolume;
-    
+
     // Supported contracts
     mapping(address => bool) public supportedNFTContracts;
     mapping(address => bool) public supportedTokenContracts;
-    
+
     // Events
     event ListingCreated(
         uint256 indexed listingId,
@@ -86,9 +93,9 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         uint256 tokenId,
         uint256 price
     );
-    
+
     event ListingCancelled(uint256 indexed listingId, address indexed seller);
-    
+
     event ItemSold(
         uint256 indexed listingId,
         address indexed seller,
@@ -96,14 +103,14 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         uint256 price,
         uint256 marketplaceFee
     );
-    
+
     event OfferCreated(
         uint256 indexed offerId,
         uint256 indexed listingId,
         address indexed offerer,
         uint256 amount
     );
-    
+
     event OfferAccepted(
         uint256 indexed offerId,
         uint256 indexed listingId,
@@ -111,23 +118,23 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         address offerer,
         uint256 amount
     );
-    
-    event OfferCancelled(uint256 indexed offerId, address indexed offerer);
-    
-    event ContractSupportUpdated(address indexed contractAddress, bool isNFT, bool supported);
 
-    constructor(
-        address _admin,
-        address _slawToken,
-        address _treasuryCore
-    ) {
+    event OfferCancelled(uint256 indexed offerId, address indexed offerer);
+
+    event ContractSupportUpdated(
+        address indexed contractAddress,
+        bool isNFT,
+        bool supported
+    );
+
+    constructor(address _admin, address _slawToken, address _treasuryCore) {
         require(_slawToken != address(0), "Invalid SLAW token");
         require(_treasuryCore != address(0), "Invalid treasury core");
-        
+
         _grantRole(DEFAULT_ADMIN_ROLE, _admin);
         _grantRole(MARKETPLACE_ADMIN, _admin);
         _grantRole(TREASURY_ROLE, _treasuryCore);
-        
+
         slawToken = SLAWToken(_slawToken);
         treasuryCore = TreasuryCore(_treasuryCore);
     }
@@ -149,15 +156,24 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         uint256 duration,
         bool allowOffers
     ) external nonReentrant whenNotPaused returns (uint256 listingId) {
-        require(supportedNFTContracts[nftContract], "NFT contract not supported");
+        require(
+            supportedNFTContracts[nftContract],
+            "NFT contract not supported"
+        );
         require(price > 0, "Price must be > 0");
         require(duration > 0 && duration <= 365 days, "Invalid duration");
-        require(IERC721(nftContract).ownerOf(tokenId) == msg.sender, "Not NFT owner");
-        require(IERC721(nftContract).isApprovedForAll(msg.sender, address(this)) || 
-                IERC721(nftContract).getApproved(tokenId) == address(this), "Marketplace not approved");
-        
+        require(
+            IERC721(nftContract).ownerOf(tokenId) == msg.sender,
+            "Not NFT owner"
+        );
+        require(
+            IERC721(nftContract).isApprovedForAll(msg.sender, address(this)) ||
+                IERC721(nftContract).getApproved(tokenId) == address(this),
+            "Marketplace not approved"
+        );
+
         listingId = nextListingId++;
-        
+
         listings[listingId] = Listing({
             listingId: listingId,
             seller: msg.sender,
@@ -170,11 +186,18 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
             expiresAt: block.timestamp + duration,
             allowOffers: allowOffers
         });
-        
+
         userListings[msg.sender].push(listingId);
         totalListings++;
-        
-        emit ListingCreated(listingId, msg.sender, ListingType.NFT, nftContract, tokenId, price);
+
+        emit ListingCreated(
+            listingId,
+            msg.sender,
+            ListingType.NFT,
+            nftContract,
+            tokenId,
+            price
+        );
     }
 
     /**
@@ -192,15 +215,25 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         uint256 duration,
         bool allowOffers
     ) external nonReentrant whenNotPaused returns (uint256 listingId) {
-        require(supportedTokenContracts[tokenContract], "Token contract not supported");
+        require(
+            supportedTokenContracts[tokenContract],
+            "Token contract not supported"
+        );
         require(amount > 0, "Amount must be > 0");
         require(price > 0, "Price must be > 0");
         require(duration > 0 && duration <= 365 days, "Invalid duration");
-        require(IERC20(tokenContract).balanceOf(msg.sender) >= amount, "Insufficient token balance");
-        require(IERC20(tokenContract).allowance(msg.sender, address(this)) >= amount, "Insufficient allowance");
-        
+        require(
+            IERC20(tokenContract).balanceOf(msg.sender) >= amount,
+            "Insufficient token balance"
+        );
+        require(
+            IERC20(tokenContract).allowance(msg.sender, address(this)) >=
+                amount,
+            "Insufficient allowance"
+        );
+
         listingId = nextListingId++;
-        
+
         listings[listingId] = Listing({
             listingId: listingId,
             seller: msg.sender,
@@ -213,11 +246,18 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
             expiresAt: block.timestamp + duration,
             allowOffers: allowOffers
         });
-        
+
         userListings[msg.sender].push(listingId);
         totalListings++;
-        
-        emit ListingCreated(listingId, msg.sender, ListingType.TOKEN, tokenContract, amount, price);
+
+        emit ListingCreated(
+            listingId,
+            msg.sender,
+            ListingType.TOKEN,
+            tokenContract,
+            amount,
+            price
+        );
     }
 
     /**
@@ -229,10 +269,13 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");
         require(block.timestamp <= listing.expiresAt, "Listing expired");
         require(listing.seller != msg.sender, "Cannot buy own listing");
-        
+
         uint256 totalPrice = listing.price;
-        require(slawToken.balanceOf(msg.sender) >= totalPrice, "Insufficient SLAW balance");
-        
+        require(
+            slawToken.balanceOf(msg.sender) >= totalPrice,
+            "Insufficient SLAW balance"
+        );
+
         // Process payment through treasury (handles fee calculation and distribution)
         uint256 netAmount = treasuryCore.processMarketplaceFee(
             listing.seller,
@@ -240,31 +283,40 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
             totalPrice,
             listingId
         );
-        
+
         // Transfer the item
         if (listing.listingType == ListingType.NFT) {
             IERC721(listing.tokenContract).safeTransferFrom(
-                listing.seller, 
-                msg.sender, 
+                listing.seller,
+                msg.sender,
                 listing.tokenId
             );
         } else {
-            require(IERC20(listing.tokenContract).transferFrom(
-                listing.seller, 
-                msg.sender, 
-                listing.tokenId // amount stored in tokenId field
-            ), "Token transfer failed");
+            require(
+                IERC20(listing.tokenContract).transferFrom(
+                    listing.seller,
+                    msg.sender,
+                    listing.tokenId // amount stored in tokenId field
+                ),
+                "Token transfer failed"
+            );
         }
-        
+
         // Update listing status
         listing.status = ListingStatus.SOLD;
         totalSales++;
         totalVolume += totalPrice;
-        
+
         // Cancel all active offers for this listing
         _cancelAllOffers(listingId);
-        
-        emit ItemSold(listingId, listing.seller, msg.sender, totalPrice, totalPrice - netAmount);
+
+        emit ItemSold(
+            listingId,
+            listing.seller,
+            msg.sender,
+            totalPrice,
+            totalPrice - netAmount
+        );
     }
 
     /**
@@ -273,14 +325,18 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      */
     function cancelListing(uint256 listingId) external nonReentrant {
         Listing storage listing = listings[listingId];
-        require(listing.seller == msg.sender || hasRole(MARKETPLACE_ADMIN, msg.sender), "Not authorized");
+        require(
+            listing.seller == msg.sender ||
+                hasRole(MARKETPLACE_ADMIN, msg.sender),
+            "Not authorized"
+        );
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");
-        
+
         listing.status = ListingStatus.CANCELLED;
-        
+
         // Cancel all active offers for this listing
         _cancelAllOffers(listingId);
-        
+
         emit ListingCancelled(listingId, listing.seller);
     }
 
@@ -304,10 +360,13 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         require(listing.seller != msg.sender, "Cannot offer on own listing");
         require(amount > 0, "Amount must be > 0");
         require(duration > 0 && duration <= 30 days, "Invalid duration");
-        require(slawToken.balanceOf(msg.sender) >= amount, "Insufficient SLAW balance");
-        
+        require(
+            slawToken.balanceOf(msg.sender) >= amount,
+            "Insufficient SLAW balance"
+        );
+
         offerId = nextOfferId++;
-        
+
         offers[offerId] = Offer({
             offerId: offerId,
             listingId: listingId,
@@ -317,10 +376,10 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
             isActive: true,
             createdAt: block.timestamp
         });
-        
+
         listingOffers[listingId].push(offerId);
         userOffers[msg.sender].push(offerId);
-        
+
         emit OfferCreated(offerId, listingId, msg.sender, amount);
     }
 
@@ -331,13 +390,16 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
     function acceptOffer(uint256 offerId) external nonReentrant whenNotPaused {
         Offer storage offer = offers[offerId];
         Listing storage listing = listings[offer.listingId];
-        
+
         require(offer.isActive, "Offer not active");
         require(block.timestamp <= offer.expiresAt, "Offer expired");
         require(listing.seller == msg.sender, "Not listing owner");
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");
-        require(slawToken.balanceOf(offer.offerer) >= offer.amount, "Offerer insufficient balance");
-        
+        require(
+            slawToken.balanceOf(offer.offerer) >= offer.amount,
+            "Offerer insufficient balance"
+        );
+
         // Process payment through treasury
         uint256 netAmount = treasuryCore.processMarketplaceFee(
             listing.seller,
@@ -345,7 +407,7 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
             offer.amount,
             offer.listingId
         );
-        
+
         // Transfer the item
         if (listing.listingType == ListingType.NFT) {
             IERC721(listing.tokenContract).safeTransferFrom(
@@ -354,24 +416,39 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
                 listing.tokenId
             );
         } else {
-            require(IERC20(listing.tokenContract).transferFrom(
-                listing.seller,
-                offer.offerer,
-                listing.tokenId // amount stored in tokenId field
-            ), "Token transfer failed");
+            require(
+                IERC20(listing.tokenContract).transferFrom(
+                    listing.seller,
+                    offer.offerer,
+                    listing.tokenId // amount stored in tokenId field
+                ),
+                "Token transfer failed"
+            );
         }
-        
+
         // Update states
         listing.status = ListingStatus.SOLD;
         offer.isActive = false;
         totalSales++;
         totalVolume += offer.amount;
-        
+
         // Cancel all other offers for this listing
         _cancelAllOffers(offer.listingId);
-        
-        emit OfferAccepted(offerId, offer.listingId, listing.seller, offer.offerer, offer.amount);
-        emit ItemSold(offer.listingId, listing.seller, offer.offerer, offer.amount, offer.amount - netAmount);
+
+        emit OfferAccepted(
+            offerId,
+            offer.listingId,
+            listing.seller,
+            offer.offerer,
+            offer.amount
+        );
+        emit ItemSold(
+            offer.listingId,
+            listing.seller,
+            offer.offerer,
+            offer.amount,
+            offer.amount - netAmount
+        );
     }
 
     /**
@@ -380,11 +457,15 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      */
     function cancelOffer(uint256 offerId) external nonReentrant {
         Offer storage offer = offers[offerId];
-        require(offer.offerer == msg.sender || hasRole(MARKETPLACE_ADMIN, msg.sender), "Not authorized");
+        require(
+            offer.offerer == msg.sender ||
+                hasRole(MARKETPLACE_ADMIN, msg.sender),
+            "Not authorized"
+        );
         require(offer.isActive, "Offer not active");
-        
+
         offer.isActive = false;
-        
+
         emit OfferCancelled(offerId, offer.offerer);
     }
 
@@ -396,7 +477,7 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      */
     function _cancelAllOffers(uint256 listingId) internal {
         uint256[] memory offerIds = listingOffers[listingId];
-        
+
         for (uint256 i = 0; i < offerIds.length; i++) {
             Offer storage offer = offers[offerIds[i]];
             if (offer.isActive) {
@@ -418,9 +499,9 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         bool supported
     ) external onlyRole(MARKETPLACE_ADMIN) {
         require(nftContract != address(0), "Invalid contract address");
-        
+
         supportedNFTContracts[nftContract] = supported;
-        
+
         emit ContractSupportUpdated(nftContract, true, supported);
     }
 
@@ -434,9 +515,9 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         bool supported
     ) external onlyRole(MARKETPLACE_ADMIN) {
         require(tokenContract != address(0), "Invalid contract address");
-        
+
         supportedTokenContracts[tokenContract] = supported;
-        
+
         emit ContractSupportUpdated(tokenContract, false, supported);
     }
 
@@ -452,16 +533,16 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
         bool supported
     ) external onlyRole(MARKETPLACE_ADMIN) {
         require(contracts.length <= 20, "Too many contracts"); // PVM memory limit
-        
+
         for (uint256 i = 0; i < contracts.length; i++) {
             require(contracts[i] != address(0), "Invalid contract address");
-            
+
             if (isNFT) {
                 supportedNFTContracts[contracts[i]] = supported;
             } else {
                 supportedTokenContracts[contracts[i]] = supported;
             }
-            
+
             emit ContractSupportUpdated(contracts[i], isNFT, supported);
         }
     }
@@ -472,7 +553,9 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      * @dev Get listing details
      * @param listingId Listing ID
      */
-    function getListing(uint256 listingId) external view returns (Listing memory) {
+    function getListing(
+        uint256 listingId
+    ) external view returns (Listing memory) {
         return listings[listingId];
     }
 
@@ -488,7 +571,9 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      * @dev Get user listings
      * @param user User address
      */
-    function getUserListings(address user) external view returns (uint256[] memory) {
+    function getUserListings(
+        address user
+    ) external view returns (uint256[] memory) {
         return userListings[user];
     }
 
@@ -496,7 +581,9 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      * @dev Get user offers
      * @param user User address
      */
-    function getUserOffers(address user) external view returns (uint256[] memory) {
+    function getUserOffers(
+        address user
+    ) external view returns (uint256[] memory) {
         return userOffers[user];
     }
 
@@ -504,21 +591,32 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      * @dev Get listing offers
      * @param listingId Listing ID
      */
-    function getListingOffers(uint256 listingId) external view returns (uint256[] memory) {
+    function getListingOffers(
+        uint256 listingId
+    ) external view returns (uint256[] memory) {
         return listingOffers[listingId];
     }
 
     /**
      * @dev Get system metrics
      */
-    function getSystemMetrics() external view returns (
-        uint256 _totalListings,
-        uint256 _totalSales,
-        uint256 _totalVolume,
-        uint256 activeListings
-    ) {
+    function getSystemMetrics()
+        external
+        view
+        returns (
+            uint256 _totalListings,
+            uint256 _totalSales,
+            uint256 _totalVolume,
+            uint256 activeListings
+        )
+    {
         // Note: activeListings would require iteration in full implementation
-        return (totalListings, totalSales, totalVolume, totalListings - totalSales);
+        return (
+            totalListings,
+            totalSales,
+            totalVolume,
+            totalListings - totalSales
+        );
     }
 
     // ===== TREASURY INTEGRATION =====
@@ -527,9 +625,11 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      * @dev Update treasury core address
      * @param newTreasuryCore New treasury core address
      */
-    function updateTreasuryCore(address newTreasuryCore) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function updateTreasuryCore(
+        address newTreasuryCore
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(newTreasuryCore != address(0), "Invalid treasury address");
-        
+
         _revokeRole(TREASURY_ROLE, address(treasuryCore));
         treasuryCore = TreasuryCore(newTreasuryCore);
         _grantRole(TREASURY_ROLE, newTreasuryCore);
@@ -549,13 +649,15 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      * @dev Emergency cancel listing (admin only)
      * @param listingId Listing ID to cancel
      */
-    function emergencyCancelListing(uint256 listingId) external onlyRole(MARKETPLACE_ADMIN) {
+    function emergencyCancelListing(
+        uint256 listingId
+    ) external onlyRole(MARKETPLACE_ADMIN) {
         Listing storage listing = listings[listingId];
         require(listing.status == ListingStatus.ACTIVE, "Listing not active");
-        
+
         listing.status = ListingStatus.CANCELLED;
         _cancelAllOffers(listingId);
-        
+
         emit ListingCancelled(listingId, listing.seller);
     }
 
@@ -564,10 +666,13 @@ contract MarketplaceCore is AccessControl, ReentrancyGuard, Pausable {
      * @param token Token address
      * @param amount Amount to recover
      */
-    function emergencyRecoverToken(address token, uint256 amount) external onlyRole(DEFAULT_ADMIN_ROLE) {
+    function emergencyRecoverToken(
+        address token,
+        uint256 amount
+    ) external onlyRole(DEFAULT_ADMIN_ROLE) {
         require(token != address(0), "Invalid token");
         require(amount > 0, "Invalid amount");
-        
+
         IERC20(token).transfer(address(treasuryCore), amount);
     }
 }
