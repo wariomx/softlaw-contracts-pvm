@@ -10,15 +10,28 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "./SLAWToken.sol";
 
 /**
- * @title WrappedIPToken
+ * @title PersonalizedWrappedIPToken
  * @dev Individual ERC20 token representing fractional ownership of an NFT
+ * Features personalized naming based on creator
  */
-contract WrappedIPToken is ERC20 {
+contract PersonalizedWrappedIPToken is ERC20 {
     uint256 public immutable nftId;
     address public immutable nftContract;
     address public immutable creator;
     address public immutable manager;
     string public ipMetadata;
+    string public creatorName;
+    uint256 public immutable createdAt;
+    uint256 public pricePerToken; // Price in SLAW
+    
+    // Value metrics
+    uint256 public totalTradingVolume;
+    uint256 public totalHolders;
+    mapping(address => bool) public hasHeld; // Track unique holders
+    
+    event TokenTraded(address indexed from, address indexed to, uint256 amount, uint256 volume);
+    event PriceUpdated(uint256 oldPrice, uint256 newPrice);
+    event ValueMetricsUpdated(uint256 volume, uint256 holders);
     
     constructor(
         uint256 _nftId,
@@ -26,33 +39,149 @@ contract WrappedIPToken is ERC20 {
         address _creator,
         address _manager,
         uint256 _totalSupply,
-        string memory _name,
-        string memory _symbol,
+        uint256 _pricePerToken,
+        string memory _creatorName,
+        string memory _ipTitle,
         string memory _metadata
-    ) ERC20(_name, _symbol) {
+    ) ERC20(
+        string(abi.encodePacked(_creatorName, "'s ", _ipTitle)),
+        string(abi.encodePacked(_getCreatorPrefix(_creatorName), _getTitlePrefix(_ipTitle)))
+    ) {
         nftId = _nftId;
         nftContract = _nftContract;
         creator = _creator;
         manager = _manager;
+        creatorName = _creatorName;
         ipMetadata = _metadata;
+        createdAt = block.timestamp;
+        pricePerToken = _pricePerToken;
         
         // Mint total supply to creator
         _mint(_creator, _totalSupply);
+        
+        // Track creator as first holder
+        hasHeld[_creator] = true;
+        totalHolders = 1;
     }
     
+    /**
+     * @dev Get creator prefix for symbol (first 3 chars)
+     */
+    function _getCreatorPrefix(string memory _creatorName) internal pure returns (string memory) {
+        bytes memory nameBytes = bytes(_creatorName);
+        if (nameBytes.length == 0) return "UNK";
+        
+        uint256 length = nameBytes.length > 3 ? 3 : nameBytes.length;
+        bytes memory prefix = new bytes(length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            prefix[i] = nameBytes[i];
+        }
+        
+        return string(prefix);
+    }
+    
+    /**
+     * @dev Get title prefix for symbol
+     */
+    function _getTitlePrefix(string memory _ipTitle) internal pure returns (string memory) {
+        bytes memory titleBytes = bytes(_ipTitle);
+        if (titleBytes.length == 0) return "IP";
+        
+        uint256 length = titleBytes.length > 2 ? 2 : titleBytes.length;
+        bytes memory prefix = new bytes(length);
+        
+        for (uint256 i = 0; i < length; i++) {
+            prefix[i] = titleBytes[i];
+        }
+        
+        return string(prefix);
+    }
+    
+    /**
+     * @dev Update metadata (only manager)
+     */
     function updateMetadata(string calldata newMetadata) external {
         require(msg.sender == manager, "Only manager can update");
         ipMetadata = newMetadata;
+    }
+    
+    /**
+     * @dev Update price per token (only creator)
+     */
+    function updatePrice(uint256 newPrice) external {
+        require(msg.sender == creator, "Only creator can update price");
+        require(newPrice > 0, "Price must be > 0");
+        
+        uint256 oldPrice = pricePerToken;
+        pricePerToken = newPrice;
+        
+        emit PriceUpdated(oldPrice, newPrice);
+    }
+    
+    /**
+     * @dev Override transfer to track metrics
+     */
+    function _update(address from, address to, uint256 value) internal override {
+        super._update(from, to, value);
+        
+        // Skip if minting or burning
+        if (from == address(0) || to == address(0)) return;
+        
+        // Track trading volume (approximate)
+        uint256 volume = (value * pricePerToken) / 10**18;
+        totalTradingVolume += volume;
+        
+        // Track new holders
+        if (!hasHeld[to] && balanceOf(to) > 0) {
+            hasHeld[to] = true;
+            totalHolders++;
+        }
+        
+        emit TokenTraded(from, to, value, volume);
+        emit ValueMetricsUpdated(totalTradingVolume, totalHolders);
+    }
+    
+    /**
+     * @dev Get token value metrics
+     */
+    function getValueMetrics() external view returns (
+        uint256 currentPrice,
+        uint256 tradingVolume,
+        uint256 uniqueHolders,
+        uint256 marketCap,
+        uint256 age
+    ) {
+        currentPrice = pricePerToken;
+        tradingVolume = totalTradingVolume;
+        uniqueHolders = totalHolders;
+        marketCap = (totalSupply() * pricePerToken) / 10**18;
+        age = block.timestamp - createdAt;
+    }
+    
+    /**
+     * @dev Get creator royalties info
+     */
+    function getCreatorInfo() external view returns (
+        address creatorAddress,
+        string memory creatorDisplayName,
+        uint256 creatorBalance,
+        uint256 creatorPercentage
+    ) {
+        creatorAddress = creator;
+        creatorDisplayName = creatorName;
+        creatorBalance = balanceOf(creator);
+        creatorPercentage = (creatorBalance * 100) / totalSupply();
     }
 }
 
 /**
  * @title WrappedIPManager
- * @dev Manages wrapping of copyright NFTs into fungible ERC20 tokens
+ * @dev Manages wrapping of copyright NFTs into personalized ERC20 tokens
  * Features:
- * - NFT to ERC20 conversion
- * - Metadata management
- * - Creator verification
+ * - NFT to ERC20 conversion with creator branding
+ * - Personalized token names and symbols
+ * - Creator value tracking
  * - PVM-optimized lightweight design
  */
 contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Receiver {
@@ -64,16 +193,30 @@ contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Re
     SLAWToken public immutable slawToken;
     address public treasuryCore;
     
+    // Creator profiles
+    struct CreatorProfile {
+        string displayName;
+        string bio;
+        string avatar;
+        uint256 totalWrappedIPs;
+        uint256 totalValueCreated;
+        bool isVerified;
+        uint256 joinedAt;
+    }
+    
     // Wrapped IP tracking
     struct WrappedIPInfo {
         address tokenAddress;
         uint256 nftId;
         address nftContract;
         address creator;
+        string creatorName;
         uint256 totalSupply;
-        uint256 pricePerToken; // Price in SLAW
+        uint256 initialPrice; // Initial price in SLAW
         bool isActive;
         uint256 createdAt;
+        string ipTitle;
+        string category;
         string metadata;
     }
     
@@ -81,27 +224,45 @@ contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Re
     mapping(bytes32 => WrappedIPInfo) public wrappedIPs; // keccak256(nftContract, nftId) => info
     mapping(address => bytes32) public tokenToIPId; // token address => IP ID
     mapping(address => bytes32[]) public creatorIPs; // creator => array of IP IDs
+    mapping(address => CreatorProfile) public creatorProfiles;
     mapping(address => bool) public supportedNFTContracts;
+    
+    // Creator leaderboard
+    address[] public topCreators;
+    mapping(address => uint256) public creatorRankings; // creator => ranking position
     
     // System metrics
     uint256 public totalWrappedIPs;
     uint256 public totalTokensCreated;
+    uint256 public totalValueLocked;
     
     // Events
+    event CreatorProfileCreated(address indexed creator, string displayName);
+    event CreatorProfileUpdated(address indexed creator, string displayName);
+    event CreatorVerified(address indexed creator, bool verified);
+    
     event IPWrapped(
         bytes32 indexed ipId,
         address indexed tokenAddress,
         uint256 indexed nftId,
         address nftContract,
         address creator,
+        string creatorName,
+        string ipTitle,
         uint256 totalSupply,
-        uint256 pricePerToken
+        uint256 initialPrice
     );
     
     event IPUnwrapped(
         bytes32 indexed ipId,
         address indexed tokenAddress,
         address indexed recipient
+    );
+    
+    event CreatorValueUpdated(
+        address indexed creator,
+        uint256 totalWrappedIPs,
+        uint256 totalValueCreated
     );
     
     event IPMetadataUpdated(bytes32 indexed ipId, string newMetadata);
@@ -125,32 +286,80 @@ contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Re
         treasuryCore = _treasuryCore;
     }
 
+    // ===== CREATOR PROFILE MANAGEMENT =====
+
+    /**
+     * @dev Create or update creator profile
+     * @param displayName Creator's display name
+     * @param bio Creator bio
+     * @param avatar Avatar URL
+     */
+    function createCreatorProfile(
+        string calldata displayName,
+        string calldata bio,
+        string calldata avatar
+    ) external {
+        require(bytes(displayName).length > 0, "Display name required");
+        require(bytes(displayName).length <= 50, "Display name too long");
+        
+        CreatorProfile storage profile = creatorProfiles[msg.sender];
+        bool isNew = bytes(profile.displayName).length == 0;
+        
+        profile.displayName = displayName;
+        profile.bio = bio;
+        profile.avatar = avatar;
+        
+        if (isNew) {
+            profile.joinedAt = block.timestamp;
+            profile.totalWrappedIPs = 0;
+            profile.totalValueCreated = 0;
+            profile.isVerified = false;
+            
+            emit CreatorProfileCreated(msg.sender, displayName);
+        } else {
+            emit CreatorProfileUpdated(msg.sender, displayName);
+        }
+    }
+
+    /**
+     * @dev Verify creator (admin only)
+     * @param creator Creator address
+     * @param verified Verification status
+     */
+    function verifyCreator(address creator, bool verified) external onlyRole(IP_MANAGER_ROLE) {
+        require(bytes(creatorProfiles[creator].displayName).length > 0, "Creator profile not found");
+        
+        creatorProfiles[creator].isVerified = verified;
+        
+        emit CreatorVerified(creator, verified);
+    }
+
     // ===== IP WRAPPING FUNCTIONS =====
 
     /**
-     * @dev Wrap a copyright NFT into fungible ERC20 tokens
+     * @dev Wrap a copyright NFT into personalized ERC20 tokens
      * @param nftContract Address of the NFT contract
      * @param nftId Token ID of the NFT
      * @param totalSupply Total supply of wrapped tokens to create
      * @param pricePerToken Price per wrapped token in SLAW
-     * @param tokenName Name for the wrapped token
-     * @param tokenSymbol Symbol for the wrapped token
-     * @param metadata Metadata for the wrapped IP
+     * @param ipTitle Title of the IP work
+     * @param category Category (music, art, literature, etc.)
+     * @param metadata Additional metadata for the wrapped IP
      */
     function wrapIP(
         address nftContract,
         uint256 nftId,
         uint256 totalSupply,
         uint256 pricePerToken,
-        string calldata tokenName,
-        string calldata tokenSymbol,
+        string calldata ipTitle,
+        string calldata category,
         string calldata metadata
     ) external nonReentrant whenNotPaused returns (address tokenAddress) {
         require(supportedNFTContracts[nftContract], "NFT contract not supported");
         require(totalSupply > 0, "Total supply must be > 0");
         require(pricePerToken > 0, "Price must be > 0");
-        require(bytes(tokenName).length > 0, "Name required");
-        require(bytes(tokenSymbol).length > 0, "Symbol required");
+        require(bytes(ipTitle).length > 0, "IP title required");
+        require(bytes(category).length > 0, "Category required");
         
         bytes32 ipId = keccak256(abi.encodePacked(nftContract, nftId));
         require(wrappedIPs[ipId].tokenAddress == address(0), "IP already wrapped");
@@ -158,18 +367,24 @@ contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Re
         // Verify NFT ownership
         require(IERC721(nftContract).ownerOf(nftId) == msg.sender, "Not NFT owner");
         
+        // Ensure creator has profile
+        require(bytes(creatorProfiles[msg.sender].displayName).length > 0, "Creator profile required");
+        
+        string memory creatorName = creatorProfiles[msg.sender].displayName;
+        
         // Transfer NFT to this contract (treasury holds the asset)
         IERC721(nftContract).safeTransferFrom(msg.sender, address(this), nftId);
         
-        // Deploy wrapped IP token
-        tokenAddress = address(new WrappedIPToken(
+        // Deploy personalized wrapped IP token
+        tokenAddress = address(new PersonalizedWrappedIPToken(
             nftId,
             nftContract,
             msg.sender,
             address(this),
             totalSupply,
-            tokenName,
-            tokenSymbol,
+            pricePerToken,
+            creatorName,
+            ipTitle,
             metadata
         ));
         
@@ -179,19 +394,50 @@ contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Re
             nftId: nftId,
             nftContract: nftContract,
             creator: msg.sender,
+            creatorName: creatorName,
             totalSupply: totalSupply,
-            pricePerToken: pricePerToken,
+            initialPrice: pricePerToken,
             isActive: true,
             createdAt: block.timestamp,
+            ipTitle: ipTitle,
+            category: category,
             metadata: metadata
         });
         
         tokenToIPId[tokenAddress] = ipId;
         creatorIPs[msg.sender].push(ipId);
+        
+        // Update creator metrics
+        CreatorProfile storage profile = creatorProfiles[msg.sender];
+        profile.totalWrappedIPs++;
+        
+        uint256 initialValue = (totalSupply * pricePerToken) / 10**18;
+        profile.totalValueCreated += initialValue;
+        totalValueLocked += initialValue;
+        
         totalWrappedIPs++;
         totalTokensCreated += totalSupply;
         
-        emit IPWrapped(ipId, tokenAddress, nftId, nftContract, msg.sender, totalSupply, pricePerToken);
+        // Update creator rankings
+        _updateCreatorRankings(msg.sender);
+        
+        emit IPWrapped(
+            ipId, 
+            tokenAddress, 
+            nftId, 
+            nftContract, 
+            msg.sender, 
+            creatorName, 
+            ipTitle, 
+            totalSupply, 
+            pricePerToken
+        );
+        
+        emit CreatorValueUpdated(
+            msg.sender,
+            profile.totalWrappedIPs,
+            profile.totalValueCreated
+        );
     }
 
     /**
@@ -203,14 +449,12 @@ contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Re
         require(ipInfo.isActive, "IP not active");
         require(ipInfo.creator == msg.sender, "Only creator can unwrap");
         
-        WrappedIPToken wrappedToken = WrappedIPToken(ipInfo.tokenAddress);
+        PersonalizedWrappedIPToken wrappedToken = PersonalizedWrappedIPToken(ipInfo.tokenAddress);
         
         // Verify all tokens are held by creator
         require(wrappedToken.balanceOf(msg.sender) == ipInfo.totalSupply, "Must own all tokens");
         
-        // Burn all wrapped tokens
-        // Note: In a full implementation, you'd need a burn function in WrappedIPToken
-        // For now, we'll transfer tokens to this contract as a form of "burning"
+        // Burn all wrapped tokens (transfer to this contract)
         IERC20(ipInfo.tokenAddress).transferFrom(msg.sender, address(this), ipInfo.totalSupply);
         
         // Return original NFT
@@ -219,60 +463,191 @@ contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Re
         // Deactivate wrapped IP
         ipInfo.isActive = false;
         
+        // Update creator metrics
+        CreatorProfile storage profile = creatorProfiles[msg.sender];
+        if (profile.totalWrappedIPs > 0) {
+            profile.totalWrappedIPs--;
+        }
+        
+        uint256 valueReduction = (ipInfo.totalSupply * ipInfo.initialPrice) / 10**18;
+        if (profile.totalValueCreated >= valueReduction) {
+            profile.totalValueCreated -= valueReduction;
+        }
+        if (totalValueLocked >= valueReduction) {
+            totalValueLocked -= valueReduction;
+        }
+        
         emit IPUnwrapped(ipId, ipInfo.tokenAddress, msg.sender);
+        emit CreatorValueUpdated(msg.sender, profile.totalWrappedIPs, profile.totalValueCreated);
     }
 
-    // ===== IP MANAGEMENT FUNCTIONS =====
+    // ===== CREATOR RANKINGS =====
 
     /**
-     * @dev Update IP metadata
-     * @param ipId ID of the wrapped IP
-     * @param newMetadata New metadata
+     * @dev Update creator rankings based on value created
+     * @param creator Creator address to update
      */
-    function updateIPMetadata(
-        bytes32 ipId, 
-        string calldata newMetadata
-    ) external {
-        WrappedIPInfo storage ipInfo = wrappedIPs[ipId];
-        require(ipInfo.creator == msg.sender || hasRole(IP_MANAGER_ROLE, msg.sender), "Not authorized");
-        require(ipInfo.isActive, "IP not active");
+    function _updateCreatorRankings(address creator) internal {
+        // Simple ranking system - in production, use more sophisticated algorithm
+        uint256 currentRank = creatorRankings[creator];
         
-        ipInfo.metadata = newMetadata;
+        if (currentRank == 0) {
+            // New creator
+            topCreators.push(creator);
+            creatorRankings[creator] = topCreators.length;
+        }
         
-        // Update token metadata too
-        WrappedIPToken(ipInfo.tokenAddress).updateMetadata(newMetadata);
+        // Bubble sort for top 10 (simple implementation for demo)
+        _sortTopCreators();
+    }
+    
+    /**
+     * @dev Simple bubble sort for top creators (PVM memory-safe)
+     */
+    function _sortTopCreators() internal {
+        uint256 length = topCreators.length;
+        if (length <= 1) return;
         
-        emit IPMetadataUpdated(ipId, newMetadata);
+        // Limit sorting to top 20 for PVM memory constraints
+        uint256 sortLength = length > 20 ? 20 : length;
+        
+        for (uint256 i = 0; i < sortLength - 1; i++) {
+            for (uint256 j = 0; j < sortLength - i - 1; j++) {
+                if (creatorProfiles[topCreators[j]].totalValueCreated < 
+                    creatorProfiles[topCreators[j + 1]].totalValueCreated) {
+                    
+                    // Swap
+                    address temp = topCreators[j];
+                    topCreators[j] = topCreators[j + 1];
+                    topCreators[j + 1] = temp;
+                    
+                    // Update rankings
+                    creatorRankings[topCreators[j]] = j + 1;
+                    creatorRankings[topCreators[j + 1]] = j + 2;
+                }
+            }
+        }
+    }
+
+    // ===== VIEW FUNCTIONS =====
+
+    /**
+     * @dev Get creator profile
+     * @param creator Creator address
+     */
+    function getCreatorProfile(address creator) external view returns (CreatorProfile memory) {
+        return creatorProfiles[creator];
     }
 
     /**
-     * @dev Update IP price per token
-     * @param ipId ID of the wrapped IP
-     * @param newPrice New price per token in SLAW
+     * @dev Get top creators
+     * @param limit Number of top creators to return
      */
-    function updateIPPrice(bytes32 ipId, uint256 newPrice) external {
-        WrappedIPInfo storage ipInfo = wrappedIPs[ipId];
-        require(ipInfo.creator == msg.sender, "Only creator can update price");
-        require(ipInfo.isActive, "IP not active");
-        require(newPrice > 0, "Price must be > 0");
+    function getTopCreators(uint256 limit) external view returns (
+        address[] memory creators,
+        string[] memory names,
+        uint256[] memory values,
+        bool[] memory verified
+    ) {
+        uint256 length = topCreators.length;
+        if (length == 0) {
+            return (new address[](0), new string[](0), new uint256[](0), new bool[](0));
+        }
         
-        ipInfo.pricePerToken = newPrice;
+        uint256 resultLength = limit > length ? length : limit;
+        creators = new address[](resultLength);
+        names = new string[](resultLength);
+        values = new uint256[](resultLength);
+        verified = new bool[](resultLength);
         
-        emit IPPriceUpdated(ipId, newPrice);
+        for (uint256 i = 0; i < resultLength; i++) {
+            address creator = topCreators[i];
+            creators[i] = creator;
+            names[i] = creatorProfiles[creator].displayName;
+            values[i] = creatorProfiles[creator].totalValueCreated;
+            verified[i] = creatorProfiles[creator].isVerified;
+        }
     }
 
     /**
-     * @dev Toggle IP active status (admin function)
-     * @param ipId ID of the wrapped IP
-     * @param isActive New active status
+     * @dev Get IP ID from NFT contract and token ID
+     * @param nftContract NFT contract address
+     * @param nftId NFT token ID
      */
-    function toggleIPStatus(bytes32 ipId, bool isActive) external onlyRole(IP_MANAGER_ROLE) {
-        WrappedIPInfo storage ipInfo = wrappedIPs[ipId];
-        require(ipInfo.tokenAddress != address(0), "IP not found");
+    function getIPId(address nftContract, uint256 nftId) external pure returns (bytes32) {
+        return keccak256(abi.encodePacked(nftContract, nftId));
+    }
+
+    /**
+     * @dev Get wrapped IP info by IP ID
+     * @param ipId IP ID
+     */
+    function getWrappedIPInfo(bytes32 ipId) external view returns (WrappedIPInfo memory) {
+        return wrappedIPs[ipId];
+    }
+
+    /**
+     * @dev Get wrapped IP info by token address
+     * @param tokenAddress Wrapped IP token address
+     */
+    function getWrappedIPInfoByToken(address tokenAddress) external view returns (WrappedIPInfo memory) {
+        bytes32 ipId = tokenToIPId[tokenAddress];
+        return wrappedIPs[ipId];
+    }
+
+    /**
+     * @dev Get creator's wrapped IPs with enhanced info
+     * @param creator Creator address
+     */
+    function getCreatorIPsDetailed(address creator) external view returns (
+        bytes32[] memory ipIds,
+        WrappedIPInfo[] memory ipInfos,
+        uint256[] memory currentPrices,
+        uint256[] memory marketCaps
+    ) {
+        bytes32[] memory allIPs = creatorIPs[creator];
+        uint256 length = allIPs.length;
         
-        ipInfo.isActive = isActive;
+        ipIds = new bytes32[](length);
+        ipInfos = new WrappedIPInfo[](length);
+        currentPrices = new uint256[](length);
+        marketCaps = new uint256[](length);
         
-        emit IPStatusUpdated(ipId, isActive);
+        for (uint256 i = 0; i < length; i++) {
+            bytes32 ipId = allIPs[i];
+            ipIds[i] = ipId;
+            ipInfos[i] = wrappedIPs[ipId];
+            
+            if (wrappedIPs[ipId].isActive) {
+                PersonalizedWrappedIPToken token = PersonalizedWrappedIPToken(wrappedIPs[ipId].tokenAddress);
+                currentPrices[i] = token.pricePerToken();
+                marketCaps[i] = (token.totalSupply() * token.pricePerToken()) / 10**18;
+            }
+        }
+    }
+
+    /**
+     * @dev Get system metrics with creator stats
+     */
+    function getSystemMetrics() external view returns (
+        uint256 totalWrapped,
+        uint256 totalTokens,
+        uint256 valueLockedSLAW,
+        uint256 totalCreators,
+        uint256 verifiedCreators
+    ) {
+        totalWrapped = totalWrappedIPs;
+        totalTokens = totalTokensCreated;
+        valueLockedSLAW = totalValueLocked;
+        totalCreators = topCreators.length;
+        
+        // Count verified creators
+        verifiedCreators = 0;
+        for (uint256 i = 0; i < topCreators.length; i++) {
+            if (creatorProfiles[topCreators[i]].isVerified) {
+                verifiedCreators++;
+            }
+        }
     }
 
     // ===== NFT CONTRACT MANAGEMENT =====
@@ -307,96 +682,6 @@ contract WrappedIPManager is AccessControl, ReentrancyGuard, Pausable, IERC721Re
             supportedNFTContracts[nftContracts[i]] = true;
             emit NFTContractSupported(nftContracts[i], true);
         }
-    }
-
-    // ===== VIEW FUNCTIONS =====
-
-    /**
-     * @dev Get IP ID from NFT contract and token ID
-     * @param nftContract NFT contract address
-     * @param nftId NFT token ID
-     */
-    function getIPId(address nftContract, uint256 nftId) external pure returns (bytes32) {
-        return keccak256(abi.encodePacked(nftContract, nftId));
-    }
-
-    /**
-     * @dev Get wrapped IP info by IP ID
-     * @param ipId IP ID
-     */
-    function getWrappedIPInfo(bytes32 ipId) external view returns (WrappedIPInfo memory) {
-        return wrappedIPs[ipId];
-    }
-
-    /**
-     * @dev Get wrapped IP info by token address
-     * @param tokenAddress Wrapped IP token address
-     */
-    function getWrappedIPInfoByToken(address tokenAddress) external view returns (WrappedIPInfo memory) {
-        bytes32 ipId = tokenToIPId[tokenAddress];
-        return wrappedIPs[ipId];
-    }
-
-    /**
-     * @dev Get creator's wrapped IPs
-     * @param creator Creator address
-     */
-    function getCreatorIPs(address creator) external view returns (bytes32[] memory) {
-        return creatorIPs[creator];
-    }
-
-    /**
-     * @dev Get creator's wrapped IPs with pagination
-     * @param creator Creator address
-     * @param offset Starting index
-     * @param limit Number of IPs to return
-     */
-    function getCreatorIPsPaginated(
-        address creator, 
-        uint256 offset, 
-        uint256 limit
-    ) external view returns (bytes32[] memory ipIds, WrappedIPInfo[] memory ipInfos) {
-        bytes32[] memory allIPs = creatorIPs[creator];
-        
-        if (offset >= allIPs.length) {
-            return (new bytes32[](0), new WrappedIPInfo[](0));
-        }
-        
-        uint256 end = offset + limit;
-        if (end > allIPs.length) {
-            end = allIPs.length;
-        }
-        
-        uint256 length = end - offset;
-        ipIds = new bytes32[](length);
-        ipInfos = new WrappedIPInfo[](length);
-        
-        for (uint256 i = 0; i < length; i++) {
-            bytes32 ipId = allIPs[offset + i];
-            ipIds[i] = ipId;
-            ipInfos[i] = wrappedIPs[ipId];
-        }
-    }
-
-    /**
-     * @dev Check if NFT contract is supported
-     * @param nftContract NFT contract address
-     */
-    function isNFTContractSupported(address nftContract) external view returns (bool) {
-        return supportedNFTContracts[nftContract];
-    }
-
-    /**
-     * @dev Get system metrics
-     */
-    function getSystemMetrics() external view returns (
-        uint256 totalWrapped,
-        uint256 totalTokens,
-        uint256 activeIPs
-    ) {
-        // Note: activeIPs would require iteration in a full implementation
-        // For PVM optimization, we're returning total wrapped as approximation
-        return (totalWrappedIPs, totalTokensCreated, totalWrappedIPs);
     }
 
     // ===== TREASURY INTEGRATION =====
